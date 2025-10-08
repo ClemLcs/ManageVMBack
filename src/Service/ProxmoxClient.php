@@ -218,4 +218,113 @@ class ProxmoxClient
     {
         return $this->post("/nodes/{$node}/qemu/{$vmid}/status/resume");
     }
+
+    /**
+     * Find which node a VM is on by its VMID
+     * @throws \Exception if VM is not found
+     */
+    public function findVMNode(int $vmid): string
+    {
+        $vms = $this->getVMs();
+        
+        foreach ($vms as $vm) {
+            if ($vm['vmid'] == $vmid) {
+                return $vm['node'];
+            }
+        }
+        
+        throw new \Exception("VM with ID {$vmid} not found on any node");
+    }
+
+    /**
+     * Stop a VM with mode (acpi or hard)
+     * @param string $node Node name
+     * @param int $vmid VM ID
+     * @param string $mode 'acpi' for graceful shutdown or 'hard' for force stop
+     */
+    public function stopVMWithMode(string $node, int $vmid, string $mode = 'acpi'): array
+    {
+        if ($mode === 'acpi') {
+            // Graceful ACPI shutdown
+            return $this->post("/nodes/{$node}/qemu/{$vmid}/status/shutdown");
+        } else {
+            // Hard stop (immediate)
+            return $this->post("/nodes/{$node}/qemu/{$vmid}/status/stop");
+        }
+    }
+
+    /**
+     * Get all snapshots for a VM
+     */
+    public function getSnapshots(string $node, int $vmid): array
+    {
+        $response = $this->get("/nodes/{$node}/qemu/{$vmid}/snapshot");
+        return $response['data'] ?? [];
+    }
+
+    /**
+     * Create a new snapshot
+     * @param string $node Node name
+     * @param int $vmid VM ID
+     * @param string $snapname Snapshot name
+     * @param string|null $description Optional description
+     */
+    public function createSnapshot(string $node, int $vmid, string $snapname, ?string $description = null): array
+    {
+        $data = ['snapname' => $snapname];
+        if ($description) {
+            $data['description'] = $description;
+        }
+        
+        return $this->post("/nodes/{$node}/qemu/{$vmid}/snapshot", $data);
+    }
+
+    /**
+     * Rollback to a snapshot
+     */
+    public function rollbackSnapshot(string $node, int $vmid, string $snapname): array
+    {
+        return $this->post("/nodes/{$node}/qemu/{$vmid}/snapshot/{$snapname}/rollback");
+    }
+
+    /**
+     * Delete a snapshot
+     */
+    public function deleteSnapshot(string $node, int $vmid, string $snapname): array
+    {
+        return $this->delete("/nodes/{$node}/qemu/{$vmid}/snapshot/{$snapname}");
+    }
+
+    /**
+     * Get cluster tasks (for event streaming)
+     * @param int $limit Number of tasks to return
+     */
+    public function getClusterTasks(int $limit = 100): array
+    {
+        $response = $this->get("/cluster/tasks?limit={$limit}");
+        return $response['data'] ?? [];
+    }
+
+    /**
+     * Check if Proxmox API is reachable (for health checks)
+     */
+    public function checkHealth(): bool
+    {
+        try {
+            $this->authenticate();
+            $response = $this->get('/version');
+            return isset($response['data']);
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Get Proxmox version information
+     */
+    public function getVersion(): array
+    {
+        $response = $this->get('/version');
+        return $response['data'] ?? [];
+    }
 }
