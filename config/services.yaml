@@ -18,3 +18,11 @@ services:
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
+    
+    # Proxmox Client Configuration
+    App\Service\ProxmoxClient:
+        arguments:
+            $proxmoxHost: '%env(PROXMOX_HOST)%'
+            $proxmoxUser: '%env(PROXMOX_USER)%'
+            $proxmoxPassword: '%env(PROXMOX_PASSWORD)%'
+            $verifySsl: '%env(bool:PROXMOX_VERIFY_SSL)%'
