@@ -6,6 +6,7 @@ Service API backend qui fait le pont entre les applications frontend et la gesti
 
 Ce backend agit comme un middleware entre votre application frontend et les serveurs Proxmox VE, offrant :
 - Points de terminaison API unifiés pour la gestion des VMs
+- **🔐 Authentification JWT sécurisée** pour protéger l'accès à l'API
 - Gestion de l'authentification avec l'API Proxmox
 - Agrégation de données depuis plusieurs nœuds Proxmox
 - Capacités de pagination et de filtrage
@@ -17,6 +18,367 @@ Ce backend agit comme un middleware entre votre application frontend et les serv
 - Composer
 - Symfony 7.x
 - Accès à l'API Proxmox VE (v6.x ou v7.x)
+
+## 🖥️ Configuration d'une VM Linux pour Héberger le Backend
+
+Cette section détaille les dépendances et configurations nécessaires pour créer une machine virtuelle Linux qui hébergera ce backend et fera le lien entre les machines Proxmox et le frontend.
+
+### Spécifications Recommandées de la VM
+
+**Configuration Minimale :**
+- **OS** : Ubuntu 22.04 LTS / Debian 12 / Rocky Linux 9
+- **CPU** : 2 vCPUs
+- **RAM** : 2 GB minimum (4 GB recommandé)
+- **Disque** : 20 GB minimum (50 GB recommandé)
+- **Réseau** : Interface réseau avec accès à Proxmox et au frontend
+
+**Configuration pour Production :**
+- **CPU** : 4+ vCPUs
+- **RAM** : 8 GB+
+- **Disque** : 100 GB+ (SSD recommandé)
+- **Réseau** : Interface réseau avec IP statique
+
+### Dépendances Système à Installer
+
+#### 1. Mise à Jour du Système
+
+```bash
+# Pour Ubuntu/Debian
+sudo apt update && sudo apt upgrade -y
+
+# Pour Rocky Linux/RHEL
+sudo dnf update -y
+```
+
+#### 2. Installation de PHP 8.2+
+
+**Ubuntu/Debian :**
+```bash
+# Ajouter le dépôt PPA pour PHP 8.2+
+sudo apt install software-properties-common -y
+sudo add-apt-repository ppa:ondrej/php -y
+sudo apt update
+
+# Installer PHP 8.2 et les extensions requises
+sudo apt install -y \
+    php8.2 \
+    php8.2-cli \
+    php8.2-fpm \
+    php8.2-common \
+    php8.2-curl \
+    php8.2-mbstring \
+    php8.2-xml \
+    php8.2-zip \
+    php8.2-intl \
+    php8.2-opcache \
+    php8.2-ctype \
+    php8.2-iconv
+
+# Vérifier la version
+php -v
+```
+
+**Rocky Linux/RHEL :**
+```bash
+# Activer le dépôt EPEL et Remi
+sudo dnf install -y epel-release
+sudo dnf install -y https://rpms.remirepo.net/enterprise/remi-release-9.rpm
+
+# Activer PHP 8.2
+sudo dnf module reset php -y
+sudo dnf module enable php:remi-8.2 -y
+
+# Installer PHP et les extensions
+sudo dnf install -y \
+    php \
+    php-cli \
+    php-fpm \
+    php-common \
+    php-curl \
+    php-mbstring \
+    php-xml \
+    php-zip \
+    php-intl \
+    php-opcache
+
+# Vérifier la version
+php -v
+```
+
+#### 3. Installation de Composer
+
+```bash
+# Télécharger l'installateur
+php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+
+# Vérifier l'installateur (optionnel)
+php -r "if (hash_file('sha384', 'composer-setup.php') === file_get_contents('https://composer.github.io/installer.sig')) { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;"
+
+# Installer Composer globalement
+sudo php composer-setup.php --install-dir=/usr/local/bin --filename=composer
+
+# Nettoyer
+php -r "unlink('composer-setup.php');"
+
+# Vérifier l'installation
+composer --version
+```
+
+#### 4. Installation d'un Serveur Web
+
+**Option A : Nginx (Recommandé pour la Production)**
+
+```bash
+# Ubuntu/Debian
+sudo apt install -y nginx
+
+# Rocky Linux/RHEL
+sudo dnf install -y nginx
+
+# Démarrer et activer Nginx
+sudo systemctl start nginx
+sudo systemctl enable nginx
+```
+
+**Configuration Nginx pour Symfony :**
+
+```bash
+sudo nano /etc/nginx/sites-available/managevmback
+```
+
+Contenu du fichier :
+```nginx
+server {
+    listen 80;
+    server_name votre-domaine.com;  # Remplacer par votre domaine ou IP
+    root /var/www/ManageVMBack/public;
+
+    location / {
+        try_files $uri /index.php$is_args$args;
+    }
+
+    location ~ ^/index\.php(/|$) {
+        fastcgi_pass unix:/var/run/php/php8.2-fpm.sock;
+        fastcgi_split_path_info ^(.+\.php)(/.*)$;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+        fastcgi_param DOCUMENT_ROOT $realpath_root;
+        internal;
+    }
+
+    location ~ \.php$ {
+        return 404;
+    }
+
+    error_log /var/log/nginx/managevmback_error.log;
+    access_log /var/log/nginx/managevmback_access.log;
+}
+```
+
+```bash
+# Activer le site
+sudo ln -s /etc/nginx/sites-available/managevmback /etc/nginx/sites-enabled/
+
+# Tester la configuration
+sudo nginx -t
+
+# Recharger Nginx
+sudo systemctl reload nginx
+```
+
+**Option B : Apache**
+
+```bash
+# Ubuntu/Debian
+sudo apt install -y apache2 libapache2-mod-php8.2
+
+# Rocky Linux/RHEL
+sudo dnf install -y httpd
+
+# Activer les modules nécessaires
+sudo a2enmod rewrite
+sudo a2enmod php8.2
+
+# Démarrer et activer Apache
+sudo systemctl start apache2  # ou httpd pour Rocky Linux
+sudo systemctl enable apache2
+```
+
+#### 5. Outils Système Supplémentaires
+
+```bash
+# Ubuntu/Debian
+sudo apt install -y \
+    git \
+    curl \
+    wget \
+    unzip \
+    vim \
+    net-tools \
+    ca-certificates
+
+# Rocky Linux/RHEL
+sudo dnf install -y \
+    git \
+    curl \
+    wget \
+    unzip \
+    vim \
+    net-tools \
+    ca-certificates
+```
+
+#### 6. Configuration SSL/TLS (Optionnel mais Recommandé)
+
+```bash
+# Installer Certbot pour Let's Encrypt
+# Ubuntu/Debian
+sudo apt install -y certbot python3-certbot-nginx
+
+# Rocky Linux/RHEL
+sudo dnf install -y certbot python3-certbot-nginx
+
+# Obtenir un certificat SSL
+sudo certbot --nginx -d votre-domaine.com
+
+# Le renouvellement automatique est configuré par défaut
+sudo systemctl status certbot.timer
+```
+
+#### 7. Configuration du Pare-feu
+
+```bash
+# UFW (Ubuntu/Debian)
+sudo ufw allow 22/tcp      # SSH
+sudo ufw allow 80/tcp      # HTTP
+sudo ufw allow 443/tcp     # HTTPS
+sudo ufw enable
+
+# FirewallD (Rocky Linux/RHEL)
+sudo firewall-cmd --permanent --add-service=ssh
+sudo firewall-cmd --permanent --add-service=http
+sudo firewall-cmd --permanent --add-service=https
+sudo firewall-cmd --reload
+```
+
+#### 8. Optimisation PHP pour Production
+
+Éditer le fichier `php.ini` :
+```bash
+sudo nano /etc/php/8.2/fpm/php.ini  # Ubuntu/Debian
+# ou
+sudo nano /etc/php.ini  # Rocky Linux/RHEL
+```
+
+Paramètres recommandés :
+```ini
+memory_limit = 256M
+max_execution_time = 30
+upload_max_filesize = 20M
+post_max_size = 20M
+opcache.enable = 1
+opcache.memory_consumption = 128
+opcache.max_accelerated_files = 10000
+opcache.revalidate_freq = 60
+```
+
+Redémarrer PHP-FPM :
+```bash
+sudo systemctl restart php8.2-fpm  # Ubuntu/Debian
+sudo systemctl restart php-fpm     # Rocky Linux/RHEL
+```
+
+#### 9. Configuration des Permissions
+
+```bash
+# Créer un utilisateur dédié pour l'application (optionnel)
+sudo useradd -m -s /bin/bash vmbackend
+
+# Créer le répertoire de l'application
+sudo mkdir -p /var/www/ManageVMBack
+sudo chown -R www-data:www-data /var/www/ManageVMBack  # Ubuntu/Debian
+# ou
+sudo chown -R nginx:nginx /var/www/ManageVMBack  # Rocky Linux/RHEL
+
+# Définir les permissions appropriées
+sudo chmod -R 755 /var/www/ManageVMBack
+```
+
+### Configuration Réseau
+
+#### Connexion à Proxmox
+
+Assurez-vous que la VM peut atteindre les serveurs Proxmox :
+
+```bash
+# Tester la connectivité
+curl -k https://votre-serveur-proxmox:8006
+
+# Vérifier la résolution DNS
+nslookup votre-serveur-proxmox
+```
+
+#### Autoriser les Connexions Frontend
+
+Configurez le pare-feu pour autoriser les connexions depuis le frontend :
+
+```bash
+# Si le frontend a une IP fixe
+sudo ufw allow from IP_DU_FRONTEND to any port 80
+sudo ufw allow from IP_DU_FRONTEND to any port 443
+```
+
+### Liste de Contrôle Finale
+
+Avant de déployer l'application, vérifiez :
+
+- [ ] PHP 8.2+ installé avec toutes les extensions requises
+- [ ] Composer installé et accessible globalement
+- [ ] Serveur web (Nginx/Apache) installé et configuré
+- [ ] PHP-FPM configuré et en cours d'exécution
+- [ ] Pare-feu configuré (ports 80/443 ouverts)
+- [ ] Permissions correctes sur les répertoires
+- [ ] Connexion réseau vers Proxmox fonctionnelle
+- [ ] CORS configuré pour le frontend
+- [ ] SSL/TLS configuré (pour la production)
+- [ ] Sauvegardes automatiques configurées (optionnel)
+
+### Surveillance et Logs
+
+Emplacements des logs importants :
+
+```bash
+# Logs Nginx
+/var/log/nginx/managevmback_error.log
+/var/log/nginx/managevmback_access.log
+
+# Logs Apache
+/var/log/apache2/error.log  # Ubuntu/Debian
+/var/log/httpd/error_log    # Rocky Linux/RHEL
+
+# Logs PHP-FPM
+/var/log/php8.2-fpm.log     # Ubuntu/Debian
+/var/log/php-fpm/error.log  # Rocky Linux/RHEL
+
+# Logs de l'application Symfony
+/var/www/ManageVMBack/var/log/prod.log
+/var/www/ManageVMBack/var/log/dev.log
+```
+
+Commandes utiles pour surveiller :
+```bash
+# Surveiller les logs en temps réel
+sudo tail -f /var/log/nginx/managevmback_error.log
+
+# Vérifier l'état des services
+sudo systemctl status nginx
+sudo systemctl status php8.2-fpm
+
+# Vérifier l'utilisation des ressources
+htop
+free -h
+df -h
+```
 
 ## 🚀 Installation
 
@@ -89,7 +451,44 @@ Au lieu d'utiliser nom d'utilisateur/mot de passe, vous pouvez utiliser des toke
 # PROXMOX_TOKEN_SECRET=your-token-secret
 ```
 
-### 5. Vider le cache
+### 5. Configuration JWT (Authentification)
+
+Ce backend utilise JWT (JSON Web Tokens) pour sécuriser l'API. Les clés JWT ont déjà été générées lors de l'installation.
+
+**Vérifier que les clés JWT existent :**
+```bash
+ls -la config/jwt/
+# Vous devriez voir : private.pem et public.pem
+```
+
+**Si les clés n'existent pas, générez-les :**
+```bash
+php bin/console lexik:jwt:generate-keypair
+```
+
+**Configuration des variables d'environnement JWT :**
+
+Les variables suivantes sont automatiquement configurées dans `.env` :
+```env
+###> lexik/jwt-authentication-bundle ###
+JWT_SECRET_KEY=%kernel.project_dir%/config/jwt/private.pem
+JWT_PUBLIC_KEY=%kernel.project_dir%/config/jwt/public.pem
+JWT_PASSPHRASE=your_passphrase_here
+###< lexik/jwt-authentication-bundle ###
+```
+
+**Utilisateurs de test configurés :**
+
+Pour le développement, deux utilisateurs sont préconfigurés dans `config/packages/security.yaml` :
+
+| Username | Password | Roles |
+|----------|----------|-------|
+| `admin` | `admin123` | ROLE_ADMIN, ROLE_USER |
+| `user` | `user123` | ROLE_USER |
+
+⚠️ **Important** : En production, remplacez ces utilisateurs par une vraie base de données utilisateurs !
+
+### 6. Vider le cache
 
 ```bash
 php bin/console cache:clear
@@ -122,12 +521,100 @@ Pour le déploiement en production, utilisez un serveur web approprié (Apache/N
 http://localhost:8000/api/v1
 ```
 
+### 🔐 Authentification JWT
+
+Tous les endpoints API (sauf `/api/login_check`) nécessitent une authentification JWT.
+
+#### Obtenir un Token JWT
+
+**Endpoint :** `POST /api/login_check`
+
+**Requête :**
+```bash
+curl -X POST http://localhost:8000/api/login_check \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "admin",
+    "password": "admin123"
+  }'
+```
+
+**Réponse :**
+```json
+{
+  "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9..."
+}
+```
+
+Le token est valide pendant **1 heure** (3600 secondes).
+
+#### Utiliser le Token JWT
+
+Incluez le token dans l'en-tête `Authorization` avec le préfixe `Bearer` :
+
+```bash
+curl -H "Authorization: Bearer VOTRE_TOKEN_ICI" \
+  http://localhost:8000/api/v1/vms
+```
+
+**Exemple complet :**
+```bash
+# 1. Obtenir le token
+TOKEN=$(curl -s -X POST http://localhost:8000/api/login_check \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin123"}' \
+  | jq -r '.token')
+
+# 2. Utiliser le token pour accéder à l'API
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/v1/vms
+```
+
+**JavaScript/Frontend :**
+```javascript
+// 1. Login
+const response = await fetch('http://localhost:8000/api/login_check', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    username: 'admin',
+    password: 'admin123'
+  })
+});
+
+const { token } = await response.json();
+
+// 2. Stocker le token (localStorage, sessionStorage, ou cookie sécurisé)
+localStorage.setItem('jwt_token', token);
+
+// 3. Utiliser le token dans les requêtes suivantes
+const vmsResponse = await fetch('http://localhost:8000/api/v1/vms', {
+  headers: {
+    'Authorization': `Bearer ${token}`
+  }
+});
+
+const vms = await vmsResponse.json();
+```
+
+**Gestion des erreurs JWT :**
+
+| Code | Message | Signification |
+|------|---------|---------------|
+| 401 | JWT Token not found | Token manquant dans l'en-tête Authorization |
+| 401 | Invalid JWT Token | Token invalide ou malformé |
+| 401 | Expired JWT Token | Token expiré (> 1 heure) |
+| 401 | Invalid credentials | Username ou password incorrect |
+
 ### Référence Rapide
 
 | Catégorie | Méthode | Endpoint | Description |
 |-----------|---------|----------|-------------|
-| **VMs** | GET | `/api/v1/vms` | Lister toutes les VMs (avec filtres) |
-| | GET | `/api/v1/vms/{node}/{vmid}` | Obtenir les détails d'une VM |
+| **Authentification** | POST | `/api/login_check` | 🔓 Obtenir un token JWT (pas d'auth requise) |
+| **VMs** | GET | `/api/v1/vms` | 🔒 Lister toutes les VMs (avec filtres) |
+| | GET | `/api/v1/vms/{node}/{vmid}` | 🔒 Obtenir les détails d'une VM |
 | **Contrôle VM Simplifié** | POST | `/api/v1/vms/{vmid}/start` | ⭐ Démarrer une VM (détection auto du nœud) |
 | | POST | `/api/v1/vms/{vmid}/stop` | ⭐ Arrêter une VM avec mode (acpi/hard) |
 | **Snapshots** | GET | `/api/v1/vms/{vmid}/snapshots` | Lister les snapshots d'une VM |
@@ -686,12 +1173,62 @@ tail -f var/log/dev.log
 
 ## 🔒 Considérations de Sécurité
 
+### Sécurité Générale
+
 1. **Ne jamais commiter le fichier `.env`** - Il contient des identifiants sensibles
 2. **Utiliser des tokens API au lieu de mots de passe** en production
 3. **Activer la vérification SSL** (`PROXMOX_VERIFY_SSL=true`) avec des certificats valides
 4. **Mettre à jour `CORS_ALLOW_ORIGIN`** pour correspondre uniquement au domaine de votre frontend
 5. **Changer `APP_SECRET`** pour une valeur aléatoire en production
 6. **Restreindre les permissions utilisateur Proxmox** - Créer un utilisateur dédié avec les permissions minimales requises
+
+### Sécurité JWT
+
+1. **Protéger les clés JWT** :
+   - Les fichiers `config/jwt/private.pem` et `config/jwt/public.pem` sont critiques
+   - Ne jamais commiter ces fichiers dans Git (déjà dans `.gitignore`)
+   - En production, stocker la clé privée de manière sécurisée (variables d'environnement, vault, etc.)
+   - Permissions recommandées : `chmod 600 config/jwt/private.pem`
+
+2. **Configurer une passphrase forte** :
+   ```bash
+   # Dans .env, définir une passphrase forte
+   JWT_PASSPHRASE=VotrePassphraseComplexeEtSecurisee123!@#
+   ```
+
+3. **Gérer l'expiration des tokens** :
+   - Par défaut : 1 heure (`token_ttl: 3600` dans `config/packages/lexik_jwt_authentication.yaml`)
+   - Ajuster selon vos besoins de sécurité
+   - Implémenter un système de refresh tokens pour les sessions longues
+
+4. **Remplacer les utilisateurs en mémoire en production** :
+   - Les utilisateurs actuels (`admin`, `user`) sont pour le développement uniquement
+   - Créer une entité User avec Doctrine pour la production
+   - Exemple de création d'entité User :
+   ```bash
+   php bin/console make:user
+   php bin/console make:migration
+   php bin/console doctrine:migrations:migrate
+   ```
+
+5. **Transmission sécurisée** :
+   - Toujours utiliser HTTPS en production
+   - Les tokens JWT ne doivent jamais être exposés dans les URLs
+   - Stocker les tokens côté client de manière sécurisée (httpOnly cookies recommandés)
+
+6. **Validation côté serveur** :
+   - Les tokens sont automatiquement validés par le bundle
+   - Vérifier les rôles utilisateur dans vos contrôleurs si nécessaire :
+   ```php
+   $this->denyAccessUnlessGranted('ROLE_ADMIN');
+   ```
+
+7. **Rotation des clés** :
+   - En cas de compromission, regénérer les clés :
+   ```bash
+   php bin/console lexik:jwt:generate-keypair --overwrite
+   ```
+   - Tous les tokens existants seront invalides après la rotation
 
 ### Permissions Proxmox Recommandées
 
@@ -746,6 +1283,44 @@ Si vous obtenez "VM with ID {vmid} not found on any node" :
 2. Vérifiez que l'utilisateur a les permissions pour voir cette VM
 3. Vérifiez que la VM n'est pas un conteneur LXC (cette API gère uniquement les VMs QEMU)
 
+### Problèmes JWT
+
+**"JWT Token not found"**
+- Vérifiez que vous incluez l'en-tête : `Authorization: Bearer VOTRE_TOKEN`
+- Vérifiez qu'il n'y a pas d'espace supplémentaire dans l'en-tête
+
+**"Invalid JWT Token"**
+- Le token est malformé ou corrompu
+- Obtenez un nouveau token via `/api/login_check`
+
+**"Expired JWT Token"**
+- Le token a expiré (durée de vie : 1 heure)
+- Obtenez un nouveau token via `/api/login_check`
+
+**"Invalid credentials"**
+- Username ou password incorrect
+- Vérifiez les utilisateurs configurés dans `config/packages/security.yaml`
+- Credentials par défaut : `admin` / `admin123` ou `user` / `user123`
+
+**Les clés JWT n'existent pas**
+```bash
+# Générer les clés
+php bin/console lexik:jwt:generate-keypair
+
+# Vérifier les permissions
+chmod 600 config/jwt/private.pem
+chmod 644 config/jwt/public.pem
+```
+
+**Route `/api/login_check` not found**
+```bash
+# Vider le cache
+php bin/console cache:clear
+
+# Vérifier les routes
+php bin/console debug:router | grep login
+```
+
 ## 📝 Ajout de Nouvelles Fonctionnalités
 
 ### Ajouter de Nouvelles Opérations VM
@@ -780,39 +1355,77 @@ php bin/console cache:clear
 
 ## 🧪 Tests
 
+### Tester l'Authentification JWT
+
+```bash
+# 1. Tester l'accès sans authentification (devrait échouer avec 401)
+curl http://localhost:8000/api/v1/vms
+# Réponse attendue : {"code":401,"message":"JWT Token not found"}
+
+# 2. Obtenir un token JWT
+curl -X POST http://localhost:8000/api/login_check \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin123"}'
+# Réponse attendue : {"token":"eyJ0eXAiOiJKV1QiLCJ..."}
+
+# 3. Tester avec un token valide
+TOKEN="VOTRE_TOKEN_ICI"
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/vms
+# Devrait retourner la liste des VMs (ou une erreur Proxmox si non configuré)
+
+# 4. Tester avec des credentials invalides
+curl -X POST http://localhost:8000/api/login_check \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"mauvais_password"}'
+# Réponse attendue : {"code":401,"message":"Invalid credentials."}
+```
+
 ### Tester les Endpoints
 
 ```bash
-# Tester la santé
+# Tester la santé (pas d'authentification requise)
 curl http://localhost:8000/health
 
-# Tester la disponibilité
+# Tester la disponibilité (pas d'authentification requise)
 curl http://localhost:8000/ready
 
-# Lister les VMs
-curl "http://localhost:8000/api/v1/vms?state=running"
+# Obtenir un token et le stocker
+TOKEN=$(curl -s -X POST http://localhost:8000/api/login_check \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin123"}' \
+  | jq -r '.token')
+
+# Lister les VMs (avec authentification)
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8000/api/v1/vms?state=running"
 
 # Démarrer une VM
-curl -X POST http://localhost:8000/api/v1/vms/100/start
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/v1/vms/100/start
 
 # Arrêter une VM (gracieux)
-curl -X POST http://localhost:8000/api/v1/vms/100/stop \
+curl -X POST -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"mode": "acpi"}'
+  -d '{"mode": "acpi"}' \
+  http://localhost:8000/api/v1/vms/100/stop
 
 # Lister les snapshots
-curl http://localhost:8000/api/v1/vms/100/snapshots
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/v1/vms/100/snapshots
 
 # Créer un snapshot
-curl -X POST http://localhost:8000/api/v1/vms/100/snapshot \
+curl -X POST -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "test-snapshot", "description": "Test"}'
+  -d '{"name": "test-snapshot", "description": "Test"}' \
+  http://localhost:8000/api/v1/vms/100/snapshot
 
 # Revenir à un snapshot
-curl -X POST http://localhost:8000/api/v1/vms/100/snapshot/test-snapshot/rollback
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/v1/vms/100/snapshot/test-snapshot/rollback
 
 # Flux d'événements (garder ouvert)
-curl http://localhost:8000/api/v1/events/stream
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/v1/events/stream
 ```
 
 ## 🚀 Déploiement
